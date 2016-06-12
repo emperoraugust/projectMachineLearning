@@ -1,0 +1,114 @@
+---
+title: "Machine Learning Project: Prediction Assignment Writeup"
+author: "Giacinto Maggiore"
+date: "June, 12 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+if(!require(dplyr)){ install.packages("dplyr")}
+if(!require(caret)){ install.packages("caret")}
+library(caret)
+library(dplyr)
+```
+
+## Background
+The data set used in this report is the result of the research published at 
+*Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13). Stuttgart, Germany: ACM SIGCHI, 2013.*
+
+The data set was created by the measuring of the movements of some individuals, while performing the exercises correctly or making some common mistakes. The goal of the project is to predict the mistakes using a model built by means of a training set. At the end of the report the model must be used to predict the mistake class in a test set.  
+
+##Analysis
+First of all we will clean the data, considering only the variables useful for our purpose. Then we will build a random Forest model to predict the class of the mistake, after performing a PCA components analisys. At the end of the report we will perform a prediction using the test set.
+
+###Cleaning the data
+```{r load}
+dir.create("Data",showWarnings = FALSE)
+training_url<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+test_url<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+name_train_file<-"Data/training.csv"
+name_test_file<-"Data/test.csv"
+if(!file.exists(name_train_file))
+      download.file(training_url,name_train_file)
+if(!file.exists(name_test_file))
+      download.file(test_url,name_test_file)
+
+trainSet<-as.tbl(read.csv(name_train_file,na.strings = c("NA","","#DIV/0!")))
+testSet<-as.tbl(read.csv(name_test_file))
+```
+
+The training set consists in  `r nrow(trainSet)` observations in `r ncol(trainSet)` variables. The test set consists in `r nrow(testSet)` observations in `r ncol(testSet)` variables. Many of the variables have a lot of NA values. We will delete those.
+
+```{r coltrain}
+numbers_train_na<-colSums(is.na(trainSet))
+numbers_test_na<-colSums(is.na(testSet))
+col_train<-numbers_train_na>0.6*nrow(trainSet)
+col_train<-names(col_train[!col_train %in% c(TRUE)])
+trainSet<-trainSet[,col_train]
+testSet<-testSet[,col_train[-which(col_train=="classe")]]
+```
+
+
+The first six variables are not useful for our analysis because they encode some information of the individuals, of the time and etc. So we will delete them. 
+
+```{r remove}
+trainSet<-trainSet[,7:ncol(trainSet)]
+testSet<-testSet[,7:ncol(testSet)]
+```
+We have dropped `r 160 - ncol(trainSet)` variables. 
+
+###Training and test sets
+To build and test our model we divide the training set in two sets, that are a new training set and a new test set. The training set has 60% of values, whereas the testing set has 40% values. 
+
+```{r test set}
+set.seed(20081993)
+training_index<-createDataPartition(trainSet$classe,p=0.6,list = FALSE)
+train<-trainSet[training_index,]
+test<-trainSet[-training_index,]
+```
+
+###Build the model
+Because there are `r ncol(trainSet)` variables, we perform a PCA components analysis to reduce the variables. 
+
+```{r PCA}
+pcaProc <- preProcess(train[, -which(names(train) == "classe")],
+                      method = "pca",
+                      thresh = 0.75)
+pcaProc
+```
+
+We observe that 10 PCA components are necessary to capture the 75% of variance. 
+We use  a random forest as our model, using as pre-process method the PCA components analysis to reduce the time of computing (that remains high).
+
+```{r model, cache = TRUE}
+set.seed(31081990)
+rf <- train(classe ~ .,
+             data = train,
+             method = "rf",
+             preProcess = "pca",
+             trControl = trainControl(method="cv", number=2, preProcOptions=list(thresh=0.75)),
+             prox = TRUE,
+             verbose = TRUE,
+             allowParallel = TRUE)
+```
+
+###Accuracy of the model
+
+```{r accur}
+predictions <- predict(rf, newdata=test)
+confusionMatrix(predictions, test$classe)
+```
+The accuracy is around 96%, so it is a very good accuracy. The motivation can be that the experiments are executed in a very controled way. 
+
+###Prediction
+
+```{r pred}
+pred<- predict(rf, newdata = testSet)
+testSet<-mutate(testSet,classe = pred)
+```
+
+These are the predicted values for all 20 observations:
+```{r p}
+pred
+```
